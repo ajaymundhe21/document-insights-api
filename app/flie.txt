@@ -1,0 +1,3 @@
+ajaymundhe21_db_user 0XzNu0YstkbiMUlh
+
+mongodb+srv://ajay_user:<db_password>@cluster0.4xclrc6.mongodb.net/?appName=Cluster0
