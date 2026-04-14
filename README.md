@@ -1,41 +1,53 @@
 # Document Insights API
 
 ## Overview
-This service allows users to submit documents, process them asynchronously, and retrieve summaries.
+The Document Insights API is a backend service that accepts document text, processes it asynchronously, and returns structured summaries.
+
+The system is designed to handle multiple users with limited processing capacity using rate limiting, caching, and a background worker.
+
+---
 
 ## Tech Stack
-- FastAPI
-- MongoDB Atlas
-- Redis
-- Docker
+- FastAPI (API layer)
+- MongoDB Atlas (persistent storage)
+- Redis (queue, caching, rate limiting)
+- Docker Compose (local orchestration)
 
-## Features
-- Submit document for processing
-- Background worker processes documents asynchronously
-- Rate limiting (max 3 active jobs per user)
-- Content-based caching
-- Pagination support
+---
 
-## APIs
+## Core Features
 
-### POST /documents
-Submit a document
+### 1. Asynchronous Processing
+- Documents are queued in Redis
+- A background worker consumes jobs and processes them
+- Simulates processing with a delay (10–30 seconds)
+- Updates status: `queued → processing → completed / failed`
 
-### GET /documents/{id}
-Get document status and summary
+### 2. Per-User Rate Limiting
+- Each user can have a maximum of **3 active jobs**
+- Enforced using Redis counters
+- Requests exceeding limit return **HTTP 429**
 
-### GET /users/{user_id}/documents
-List documents for a user (with pagination)
+### 3. Content-Based Caching
+- Documents are hashed using SHA-256
+- Duplicate content returns cached summary instantly
+- Redis used as cache layer with TTL
 
-## Design Decisions
-- Redis is used for:
-  - Rate limiting
-  - Caching duplicate content
-  - Queue for background processing
-- Worker runs separately to process jobs asynchronously
-- MongoDB stores document lifecycle and data
+### 4. Pagination & Filtering
+- List documents with:
+  - Pagination (`page`, `page_size`)
+  - Optional status filtering
 
-## Run Locally
+---
 
-```bash
-docker compose up --build
+## API Endpoints
+
+### POST `/documents`
+Submit a document for processing
+
+**Response**
+```json
+{
+  "document_id": "...",
+  "status": "queued"
+}

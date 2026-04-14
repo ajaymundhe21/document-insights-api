@@ -1,49 +1,94 @@
 import time
 import random
+import logging
 from bson import ObjectId
 from app.db import db, r
 
-def process(doc_id):
-    doc = db.documents.find_one({"_id": ObjectId(doc_id)})
-    print("waiting for job...")
-    if not doc:
+logging.basicConfig(level=logging.INFO)
+
+
+def process(doc_id: str):
+    lock_key = f"lock:{doc_id}"
+    user_jobs_key = None
+
+    
+    if not r.set(lock_key, "1", nx=True, ex=60):
         return
 
-    db.documents.update_one(
-        {"_id": ObjectId(doc_id)},
-        {"$set": {"status": "processing"}}
-    )
-    
-    time.sleep(random.randint(10, 30))
+    try:
+        doc = db.documents.find_one({"_id": ObjectId(doc_id)})
+        if not doc:
+            return
 
-    if random.random() < 0.1:
+        user_jobs_key = f"user:{doc['user_id']}:active"
+
+       
         db.documents.update_one(
             {"_id": ObjectId(doc_id)},
-            {"$set": {"status": "failed"}}
+            {"$set": {
+                "status": "processing",
+                "processing_started_at": time.time()
+            }}
         )
-        return
 
-    summary = doc["content"][:50] + "..."
+        
+        time.sleep(random.randint(10, 30))
 
-    db.documents.update_one(
-        {"_id": ObjectId(doc_id)},
-        {"$set": {"status": "completed", "summary": summary}}
-    )
+        
+        if random.random() < 0.1:
+            db.documents.update_one(
+                {"_id": ObjectId(doc_id)},
+                {"$set": {
+                    "status": "failed",
+                    "error": "processing failed",
+                    "updated_at": time.time()
+                }}
+            )
+            return
 
-    cache_key = f"cache:{doc['user_id']}:{doc['content_hash']}"
-    r.set(cache_key, summary, ex=3600)
+        
+        summary = doc["content"][:50] + "..."
 
-    user_jobs_key = f"user:{doc['user_id']}:active"
-    r.decr(user_jobs_key)
+     
+        db.documents.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": {
+                "status": "completed",
+                "summary": summary,
+                "completed_at": time.time(),
+                "updated_at": time.time()
+            }}
+        )
+
+        
+        cache_key = f"cache:{doc['content_hash']}"
+        r.set(cache_key, summary, ex=3600)
+
+    except Exception as e:
+        logging.error(f"Worker failed for {doc_id}: {e}")
+
+        db.documents.update_one(
+            {"_id": ObjectId(doc_id)},
+            {"$set": {
+                "status": "failed",
+                "error": str(e)
+            }}
+        )
+
+    finally:
+        
+        if user_jobs_key:
+            r.decr(user_jobs_key)
 
 
 def run_worker():
-    print("worker started")
+    logging.info("Worker started")
+
     while True:
         job = r.brpop("document_queue")
-        print("picked job:", job)
         if job:
-            doc_id = job[1]
+            doc_id = job[1].decode()
+            logging.info(f"Processing job {doc_id}")
             process(doc_id)
 
 
